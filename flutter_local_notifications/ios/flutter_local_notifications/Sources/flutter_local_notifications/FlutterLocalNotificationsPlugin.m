@@ -555,11 +555,6 @@ static FlutterError *getFlutterError(NSError *error) {
                        trigger:trigger];
 }
 
-// The UNUserNotificationCenter remove methods wait for a synchronous XPC reply
-// from the notification daemon, so they run on this serial queue instead of
-// the main thread. Being serial keeps removals in the order Dart sent them,
-// and the result is sent only after the removal finishes, so an awaited cancel
-// still happens before anything Dart schedules next.
 static dispatch_queue_t removalQueue(void) {
   static dispatch_queue_t queue;
   static dispatch_once_t onceToken;
