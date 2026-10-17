@@ -555,22 +555,47 @@ static FlutterError *getFlutterError(NSError *error) {
                        trigger:trigger];
 }
 
+// The UNUserNotificationCenter remove methods wait for a synchronous XPC reply
+// from the notification daemon, so they run on this serial queue instead of
+// the main thread. Being serial keeps removals in the order Dart sent them,
+// and the result is sent only after the removal finishes, so an awaited cancel
+// still happens before anything Dart schedules next.
+static dispatch_queue_t removalQueue(void) {
+  static dispatch_queue_t queue;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    queue = dispatch_queue_create(
+        "com.dexterous.flutter_local_notifications.removal",
+        dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL,
+                                                QOS_CLASS_USER_INITIATED, 0));
+  });
+  return queue;
+}
+
 - (void)cancel:(NSNumber *)id
         result:(FlutterResult _Nonnull)result API_AVAILABLE(ios(10.0)) {
-  UNUserNotificationCenter *center =
-      [UNUserNotificationCenter currentNotificationCenter];
   NSArray *idsToRemove =
       [[NSArray alloc] initWithObjects:[id stringValue], nil];
-  [center removePendingNotificationRequestsWithIdentifiers:idsToRemove];
-  [center removeDeliveredNotificationsWithIdentifiers:idsToRemove];
-  result(nil);
+  dispatch_async(removalQueue(), ^{
+    UNUserNotificationCenter *center =
+        [UNUserNotificationCenter currentNotificationCenter];
+    [center removePendingNotificationRequestsWithIdentifiers:idsToRemove];
+    [center removeDeliveredNotificationsWithIdentifiers:idsToRemove];
+    dispatch_async(dispatch_get_main_queue(), ^{
+      result(nil);
+    });
+  });
 }
 
 - (void)cancelAll:(FlutterResult _Nonnull)result API_AVAILABLE(ios(10.0)) {
-  UNUserNotificationCenter *center =
-      [UNUserNotificationCenter currentNotificationCenter];
-  [center removeAllPendingNotificationRequests];
-  result(nil);
+  dispatch_async(removalQueue(), ^{
+    UNUserNotificationCenter *center =
+        [UNUserNotificationCenter currentNotificationCenter];
+    [center removeAllPendingNotificationRequests];
+    dispatch_async(dispatch_get_main_queue(), ^{
+      result(nil);
+    });
+  });
 }
 
 - (UNMutableNotificationContent *)
